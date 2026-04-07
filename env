@@ -1,0 +1,14 @@
+# Database Configuration
+DATABASE_URL=sqlite:///./company.db
+DATABASE_TYPE=sqlite
+
+# AI Model Configuration  
+SLM_MODEL_NAME=microsoft/phi-2
+DEVICE=cpu
+
+# API Configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+
+# Logging
+LOG_LEVEL=INFO
