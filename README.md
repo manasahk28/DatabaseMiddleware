@@ -1,17 +1,30 @@
 # Database Middleware — NLP to SQL + SLM
 
-A FastAPI-based middleware that converts **natural-language questions into SQL queries** using a **Small Language Model (SLM)**, then executes them against a relational database.
+A full-stack middleware system that lets you **ask questions in plain English** and get back **SQL queries with live results** — powered by a Small Language Model (SLM) running locally. Includes a chatbot UI, a FastAPI backend, and support for any database via schema DDL.
+
+---
+
+## What It Does
+
+You type:
+> *"Show me the top 3 highest paid employees"*
+
+The system returns:
+```sql
+SELECT name, salary FROM employees ORDER BY salary DESC LIMIT 3;
+```
+Plus the actual query results — all in a chat interface.
 
 ---
 
 ## Architecture
 
 ```
-User Question (English)
-        │
+Browser (index.html)
+        │  HTTP POST /api/v1/query
         ▼
 ┌─────────────────────┐
-│   FastAPI Endpoint  │  POST /api/v1/query
+│   FastAPI Backend   │
 └────────┬────────────┘
          │
          ▼
@@ -27,13 +40,13 @@ User Question (English)
          ▼
 ┌─────────────────────┐
 │    SLM Inference    │  google/flan-t5-base (default)
-│  (HuggingFace)      │  microsoft/phi-2
+│   (HuggingFace)     │  microsoft/phi-2
 │                     │  TinyLlama/TinyLlama-1.1B-Chat-v1.0
 └────────┬────────────┘
-         │ raw SQL
+         │ raw output
          ▼
 ┌─────────────────────┐
-│  SQL Post-Processor │  Strip fences, extract statement, add semicolon
+│  SQL Post-Processor │  Strips fences, extracts statement, adds semicolon
 └────────┬────────────┘
          │ clean SQL
          ▼
@@ -42,7 +55,7 @@ User Question (English)
 └────────┬────────────┘
          │
          ▼
-     JSON Response
+    JSON Response → Chat UI renders results
 ```
 
 ---
@@ -53,21 +66,23 @@ User Question (English)
 .
 ├── app/
 │   ├── __init__.py
-│   ├── main.py            ← FastAPI app + lifecycle events
-│   ├── config.py          ← Settings from .env
+│   ├── main.py                ← FastAPI app, CORS, lifespan
+│   ├── config.py              ← All settings loaded from .env
 │   ├── db/
 │   │   ├── __init__.py
-│   │   └── database.py    ← Engine, session, schema introspection, seeder
+│   │   └── database.py        ← Engine, sessions, schema introspection, seeder
 │   ├── models/
 │   │   ├── __init__.py
-│   │   ├── sql_generator.py  ← SLM inference + prompt engineering
-│   │   └── schemas.py     ← Pydantic request/response models
+│   │   ├── sql_generator.py   ← SLM inference, prompt engineering, fallback
+│   │   └── schemas.py         ← Pydantic request/response models
 │   └── routes/
 │       ├── __init__.py
-│       └── api.py         ← All route handlers
+│       └── api.py             ← All API route handlers
+├── ui/
+│   └── index.html             ← Chatbot UI (open directly in browser)
 ├── tests/
-│   └── test_api.py
-├── .env
+│   └── test_api.py            ← 16 test cases
+├── .env                       ← Configuration
 ├── requirements.txt
 └── README.md
 ```
@@ -82,28 +97,50 @@ User Question (English)
 pip install -r requirements.txt
 ```
 
+> Requires Python 3.10+ (tested on Python 3.13 Windows)
+
 ### 2. Configure `.env`
 
 ```env
-DATABASE_URL=   # leave blank to connect manually via the UI or /api/v1/connect
-SLM_MODEL_NAME=google/flan-t5-base   # fastest on CPU
+DATABASE_URL=sqlite:///./company.db
+SLM_MODEL_NAME=google/flan-t5-base
 SAFE_MODE=true
+DEVICE=cpu
 ```
 
-If you do specify `DATABASE_URL`, the server will connect automatically at startup.
-
-### 3. Run the server
+### 3. Start the backend
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-If `DATABASE_URL` is configured, the server will connect automatically. Otherwise the UI and API support manual connection via `/api/v1/connect`.
+On first run, the server automatically creates and seeds a demo SQLite database with sample company data.
 
-### 4. Open the docs
+### 4. Open the Chat UI
 
-- Swagger UI → http://localhost:8000/docs  
+Open `ui/index.html` directly in your browser (no extra server needed).
+
+The UI auto-connects to `localhost:8000` and you can start asking questions immediately.
+
+### 5. API docs (optional)
+
+- Swagger UI → http://localhost:8000/docs
 - ReDoc      → http://localhost:8000/redoc
+
+---
+
+## Chat UI Features
+
+The UI (`ui/index.html`) is a standalone HTML file — no build step, no npm, just open it in a browser.
+
+- **Chatbot interface** — questions on the right, SQL + results on the left
+- **Multi-database support** — connect any DB by pasting its schema DDL, or use the built-in demo DB
+- **Auto schema detection** — if no DB is connected when you ask a question, it prompts you to set one up
+- **Results table** — scrollable table with column headers and row count
+- **SQL display** — generated SQL shown in a code block above results
+- **Method badges** — shows whether AI model or rule-based fallback was used, and confidence level
+- **Quick hint buttons** — one-click common queries
+- **Toggles** — switch between AI model / rule-based, and generate-only / generate+execute
 
 ---
 
@@ -112,48 +149,24 @@ If `DATABASE_URL` is configured, the server will connect automatically. Otherwis
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/` | API home |
-| POST | `/api/v1/query` | **NLP → SQL → execute** |
-| POST | `/api/v1/execute` | Run raw SQL |
-| POST | `/api/v1/connect` | Connect a database URL or load schema DDL |
-| GET | `/api/v1/schema` | Full DB schema (JSON + DDL) |
+| POST | `/api/v1/query` | NLP question → SQL → (optional) execute |
+| POST | `/api/v1/execute` | Run raw SQL directly |
+| GET | `/api/v1/schema` | Full DB schema as JSON + DDL |
 | GET | `/api/v1/tables` | List table names |
 | GET | `/api/v1/health` | Health check |
 
----
+### POST /api/v1/query — request body
 
-## Example Usage
-
-### Database Connect
-
-```bash
-curl -X POST http://localhost:8000/api/v1/connect \
-  -H "Content-Type: application/json" \
-  -d '{"database_url": "sqlite:///./mydb.db"}'
+```json
+{
+  "question": "Show me the top 3 highest paid employees",
+  "execute": true,
+  "use_model": true
+}
 ```
 
-Or connect via schema DDL:
+### POST /api/v1/query — response
 
-```bash
-curl -X POST http://localhost:8000/api/v1/connect \
-  -H "Content-Type: application/json" \
-  -d '{"ddl": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);"}'
-```
-
-The backend will normalize some common MySQL-style DDL syntax for SQLite in-memory mode, such as `AUTO_INCREMENT`.
-
-### NLP Query
-
-```bash
-curl -X POST http://localhost:8000/api/v1/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "Show me the top 3 highest paid employees",
-    "execute": true,
-    "use_model": true
-  }'
-```
-
-Response:
 ```json
 {
   "question": "Show me the top 3 highest paid employees",
@@ -173,34 +186,77 @@ Response:
 }
 ```
 
-### Skip the SLM (faster, rule-based)
-
-```json
-{ "question": "average salary", "use_model": false }
-```
-
-### Raw SQL
-
-```bash
-curl -X POST http://localhost:8000/api/v1/execute \
-  -H "Content-Type: application/json" \
-  -d '{"sql": "SELECT department, COUNT(*) FROM employees GROUP BY department;"}'
-```
-
 ---
 
 ## Supported SLMs
 
-| Model | Size | Speed (CPU) | Notes |
-|-------|------|-------------|-------|
-| `google/flan-t5-base` | ~250 MB | Fast | **Recommended default** |
-| `microsoft/phi-2` | ~2.8 GB | Slow | Higher accuracy |
+| Model | Size | Speed (CPU) | Recommended |
+|-------|------|-------------|-------------|
+| `google/flan-t5-base` | ~250 MB | Fast | Yes — default |
 | `TinyLlama/TinyLlama-1.1B-Chat-v1.0` | ~600 MB | Medium | Good balance |
+| `microsoft/phi-2` | ~2.8 GB | Slow | Highest accuracy |
 
-Change via `.env`:
+Change model in `.env`:
 ```env
 SLM_MODEL_NAME=microsoft/phi-2
 ```
+
+The model downloads automatically from HuggingFace on first use.
+
+---
+
+## Multi-Database Support
+
+The system supports any relational database. To use your own DB:
+
+**Option 1 — via the UI:**
+Click "Change DB" → "Paste schema DDL" → paste your `CREATE TABLE` statements.
+
+**Option 2 — via `.env`:**
+```env
+DATABASE_URL=postgresql://user:password@localhost:5432/mydb
+DATABASE_TYPE=postgresql
+```
+Then install the driver:
+```bash
+pip install psycopg2-binary   # PostgreSQL
+pip install pymysql           # MySQL
+```
+
+**Option 3 — via API:**
+Use `POST /api/v1/query` with your question — it always introspects the live DB schema automatically.
+
+---
+
+## SAFE_MODE
+
+When `SAFE_MODE=true` (default), only `SELECT` and `WITH` queries are allowed. Any `DROP`, `INSERT`, `UPDATE`, or `DELETE` via `/api/v1/execute` returns HTTP 403. The NLP endpoint is naturally biased toward SELECT queries due to the few-shot examples in the prompt.
+
+Disable only if you need write access:
+```env
+SAFE_MODE=false
+```
+
+---
+
+## Demo Database
+
+The seeder creates four tables with Indian company sample data on first run:
+
+| Table | Columns |
+|-------|---------|
+| `employees` | id, name, department, salary, hire_date, manager_id |
+| `departments` | id, name, budget, location |
+| `projects` | id, title, department_id, start_date, end_date, status |
+| `employee_projects` | employee_id, project_id, role |
+
+Try these questions to get started:
+- "Show all employees in Engineering"
+- "What is the average salary by department?"
+- "List all active projects"
+- "Top 5 highest paid employees"
+- "Count employees per department"
+- "Show employees and their projects"
 
 ---
 
@@ -210,22 +266,22 @@ SLM_MODEL_NAME=microsoft/phi-2
 pytest tests/ -v
 ```
 
----
-
-## SAFE_MODE
-
-When `SAFE_MODE=true` (default), only `SELECT` and `WITH` queries are allowed through the executor. Any attempt to run `DROP`, `INSERT`, `UPDATE`, or `DELETE` via `/api/v1/execute` will return HTTP 403.
-
-The NLP endpoint generates queries based on the schema context and few-shot examples, which naturally biases toward SELECT statements.
+Tests use an in-memory SQLite database and the rule-based fallback — no GPU or model download required.
 
 ---
 
-## Manual Database Configuration
+## Dependencies
 
-This service does not include a default demo database by default. Connect any database by either:
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `fastapi` | >=0.115.0 | API framework |
+| `uvicorn` | >=0.30.0 | ASGI server |
+| `sqlalchemy` | >=2.0.36 | ORM + query execution |
+| `transformers` | >=4.40.0 | HuggingFace SLM loading |
+| `torch` | >=2.1.0 | Model inference |
+| `pydantic` | >=2.7.0 | Request/response validation |
+| `python-dotenv` | >=1.0.0 | .env config loading |
+| `sentencepiece` | >=0.2.0 | Tokenizer support |
+| `accelerate` | >=0.26.0 | Optimized model loading |
 
-- providing `DATABASE_URL` in `.env`
-- POSTing to `/api/v1/connect` with a `database_url`
-- POSTing to `/api/v1/connect` with schema `ddl`
-
-The backend will then introspect your connected schema and generate SQL against it.
+> All versions are minimum bounds compatible with Python 3.13 on Windows.
