@@ -85,10 +85,12 @@ pip install -r requirements.txt
 ### 2. Configure `.env`
 
 ```env
-DATABASE_URL=sqlite:///./company.db
+DATABASE_URL=   # leave blank to connect manually via the UI or /api/v1/connect
 SLM_MODEL_NAME=google/flan-t5-base   # fastest on CPU
 SAFE_MODE=true
 ```
+
+If you do specify `DATABASE_URL`, the server will connect automatically at startup.
 
 ### 3. Run the server
 
@@ -96,7 +98,7 @@ SAFE_MODE=true
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The server will automatically create and seed a demo SQLite database on first run.
+If `DATABASE_URL` is configured, the server will connect automatically. Otherwise the UI and API support manual connection via `/api/v1/connect`.
 
 ### 4. Open the docs
 
@@ -112,6 +114,7 @@ The server will automatically create and seed a demo SQLite database on first ru
 | GET | `/` | API home |
 | POST | `/api/v1/query` | **NLP → SQL → execute** |
 | POST | `/api/v1/execute` | Run raw SQL |
+| POST | `/api/v1/connect` | Connect a database URL or load schema DDL |
 | GET | `/api/v1/schema` | Full DB schema (JSON + DDL) |
 | GET | `/api/v1/tables` | List table names |
 | GET | `/api/v1/health` | Health check |
@@ -119,6 +122,24 @@ The server will automatically create and seed a demo SQLite database on first ru
 ---
 
 ## Example Usage
+
+### Database Connect
+
+```bash
+curl -X POST http://localhost:8000/api/v1/connect \
+  -H "Content-Type: application/json" \
+  -d '{"database_url": "sqlite:///./mydb.db"}'
+```
+
+Or connect via schema DDL:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/connect \
+  -H "Content-Type: application/json" \
+  -d '{"ddl": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);"}'
+```
+
+The backend will normalize some common MySQL-style DDL syntax for SQLite in-memory mode, such as `AUTO_INCREMENT`.
 
 ### NLP Query
 
@@ -199,11 +220,12 @@ The NLP endpoint generates queries based on the schema context and few-shot exam
 
 ---
 
-## Demo Database Schema
+## Manual Database Configuration
 
-The seeder creates four tables on first run:
+This service does not include a default demo database by default. Connect any database by either:
 
-- **employees** (id, name, department, salary, hire_date, manager_id)
-- **departments** (id, name, budget, location)
-- **projects** (id, title, department_id, start_date, end_date, status)
-- **employee_projects** (employee_id, project_id, role)
+- providing `DATABASE_URL` in `.env`
+- POSTing to `/api/v1/connect` with a `database_url`
+- POSTing to `/api/v1/connect` with schema `ddl`
+
+The backend will then introspect your connected schema and generate SQL against it.

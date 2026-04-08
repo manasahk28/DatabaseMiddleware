@@ -128,7 +128,7 @@
   <div class="empty-state" id="empty-state">
     <div class="empty-icon">&#128202;</div>
     <div class="empty-title">Ask anything about your data</div>
-    <div class="empty-sub">Type a question in plain English. Connect any database by pasting its schema DDL, or use the built-in demo database.</div>
+    <div class="empty-sub">Type a question in plain English. Connect a database first by entering a DB URL or pasting schema DDL.</div>
   </div>
 </div>
 
@@ -156,7 +156,6 @@
 <script>
 const API = 'http://localhost:8000/api/v1';
 let hasSchema = false;
-let customDDL = null;
 let pendingQuestion = null;
 
 function esc(s) {
@@ -169,7 +168,6 @@ async function checkHealth() {
     const r = await fetch(API + '/health');
     if (r.ok) {
       setStatus(true);
-      loadDefaultSchema();
     } else throw new Error();
   } catch {
     setStatus(false);
@@ -179,18 +177,7 @@ async function checkHealth() {
 
 function setStatus(online) {
   document.getElementById('status-dot').style.background = online ? '#639922' : '#E24B4A';
-  document.getElementById('status-text').textContent = online ? 'Connected' : 'Offline — start uvicorn';
-}
-
-async function loadDefaultSchema() {
-  try {
-    const r = await fetch(API + '/schema');
-    const data = await r.json();
-    customDDL = null;
-    hasSchema = true;
-    updateSchemaBar(Object.keys(data.tables), true);
-    document.getElementById('db-label').textContent = `DB: company.db (${Object.keys(data.tables).length} tables)`;
-  } catch { updateSchemaBar([], false); }
+  document.getElementById('status-text').textContent = online ? 'Backend online' : 'Offline — start uvicorn';
 }
 
 function updateSchemaBar(tables, connected) {
@@ -229,28 +216,33 @@ function showSchemaChooser() {
     <div class="schema-prompt">
       <p>How would you like to connect your database?</p>
       <div class="choice-row">
-        <button class="choice-btn" onclick="useDefaultDB(this)">&#128202; Default DB<br><small style="color:var(--text3)">company.db demo data</small></button>
-        <button class="choice-btn" onclick="showDDLInput(this)">&#128196; Paste schema DDL<br><small style="color:var(--text3)">bring your own DB</small></button>
+        <button class="choice-btn" onclick="showDBUrlInput(this)">&#128202; Connect DB URL<br><small style="color:var(--text3)">sqlite:///./mydata.db or any supported SQLAlchemy URL</small></button>
+        <button class="choice-btn" onclick="showDDLInput(this)">&#128196; Paste schema DDL<br><small style="color:var(--text3)">create an in-memory database</small></button>
       </div>
     </div>`, false);
   d.id = 'schema-chooser';
 }
 
-function useDefaultDB(btn) {
+function showDBUrlInput(btn) {
   document.getElementById('schema-chooser')?.remove();
-  customDDL = null;
-  loadDefaultSchema().then(() => {
-    addBotText('Switched to the default database (company.db). It has employees, departments, projects, and employee_projects. What would you like to know?');
-    if (pendingQuestion) { const q = pendingQuestion; pendingQuestion = null; doQuery(q); }
-  });
+  const d = addMsg(`
+    <div class="schema-prompt">
+      <p>Enter your database connection URL.</p>
+      <input id="db-url" class="schema-textarea" placeholder="sqlite:///./mydb.db" />
+      <div class="btn-row">
+        <button onclick="this.closest('.msg').remove()">Cancel</button>
+        <button class="primary" onclick="submitDBUrl()">Connect</button>
+      </div>
+    </div>`, false);
+  d.id = 'db-url-input';
 }
 
 function showDDLInput(btn) {
   document.getElementById('schema-chooser')?.remove();
   const d = addMsg(`
     <div class="schema-prompt">
-      <p>Paste your CREATE TABLE statements below. SQL will be generated based on this schema.</p>
-      <textarea class="schema-textarea" id="ddl-text" placeholder="CREATE TABLE users (\n  id INTEGER PRIMARY KEY,\n  name TEXT,\n  email TEXT\n);\n\nCREATE TABLE orders (\n  id INTEGER PRIMARY KEY,\n  user_id INTEGER,\n  amount REAL\n);"></textarea>
+      <p>Paste your CREATE TABLE statements below. This will create an in-memory database for query execution.</p>
+      <textarea class="schema-textarea" id="ddl-text" placeholder="CREATE TABLE users (\n  id INTEGER PRIMARY KEY,\n  name TEXT\n);\n\nCREATE TABLE orders (\n  id INTEGER PRIMARY KEY,\n  user_id INTEGER,\n  amount REAL\n);"></textarea>
       <div class="btn-row">
         <button onclick="this.closest('.msg').remove()">Cancel</button>
         <button class="primary" onclick="submitDDL()">Use this schema</button>
@@ -259,19 +251,51 @@ function showDDLInput(btn) {
   d.id = 'ddl-input';
 }
 
-function submitDDL() {
+async function submitDBUrl() {
+  const database_url = document.getElementById('db-url')?.value.trim();
+  if (!database_url) return;
+  document.getElementById('db-url-input')?.remove();
+  await connectDatabase({ database_url });
+}
+
+async function submitDDL() {
   const ddl = document.getElementById('ddl-text')?.value.trim();
   if (!ddl) return;
   document.getElementById('ddl-input')?.remove();
-  customDDL = ddl;
-  hasSchema = true;
-  const tables = [];
-  const rx = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?\s*\(/gi;
-  let m; while ((m = rx.exec(ddl)) !== null) tables.push(m[1]);
-  updateSchemaBar(tables, true);
-  document.getElementById('db-label').textContent = `DB: custom (${tables.length} table${tables.length !== 1 ? 's' : ''})`;
-  addBotText(`Schema loaded: ${tables.length} table(s) — ${tables.join(', ')}. Note: I'll generate SQL for your questions. Execution requires your backend to point at this DB. What would you like to query?`);
-  if (pendingQuestion) { const q = pendingQuestion; pendingQuestion = null; doQuery(q); }
+  await connectDatabase({ ddl });
+}
+
+async function connectDatabase(body) {
+  addBotText('Connecting to database...');
+  try {
+    const res = await fetch(API + '/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Unable to connect to database.');
+    }
+
+    const data = await res.json();
+    hasSchema = true;
+    const tables = data.tables || [];
+    updateSchemaBar(tables, true);
+    document.getElementById('db-label').textContent = body.database_url
+      ? `DB: ${body.database_url}`
+      : `DB: custom (${tables.length} table${tables.length !== 1 ? 's' : ''})`;
+
+    addBotText(`Connected successfully. Schema contains ${tables.length} table(s): ${tables.join(', ')}.`);
+    if (pendingQuestion) {
+      const q = pendingQuestion;
+      pendingQuestion = null;
+      doQuery(q);
+    }
+  } catch (err) {
+    addBotText(err.message);
+  }
 }
 
 function buildResultBubble(data) {
@@ -321,7 +345,7 @@ async function sendMessage() {
   document.getElementById('send-btn').disabled = true;
   addMsg(`<p>${esc(question)}</p>`, true);
 
-  if (!hasSchema && !customDDL) {
+  if (!hasSchema) {
     pendingQuestion = question;
     addBotText("I need to know your database schema first. Which database would you like to use?");
     showSchemaChooser();

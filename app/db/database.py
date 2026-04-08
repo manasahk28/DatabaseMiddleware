@@ -2,10 +2,12 @@
 Database connection, session management, and schema introspection.
 """
 
-from sqlalchemy import create_engine, inspect, text, MetaData
+from fastapi import HTTPException
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator, Dict, List, Any
 import logging
+import re
 
 from app.config import settings
 
@@ -15,18 +17,75 @@ logger = logging.getLogger(__name__)
 # Engine & Session
 # ---------------------------------------------------------------------------
 
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
-    echo=False,
-)
+_engine = None
+_SessionLocal = None
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def init_engine(database_url: str):
+    global _engine, _SessionLocal
+    if not database_url or not database_url.strip():
+        raise ValueError("DATABASE_URL must be provided to initialize the database engine.")
+
+    connect_args = {"check_same_thread": False} if "sqlite" in database_url else {}
+    if _engine is not None:
+        _engine.dispose()
+
+    _engine = create_engine(database_url, connect_args=connect_args, echo=False)
+    _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+    logger.info(f"✅ Connected to database: {database_url}")
+    return _engine
+
+
+def set_database_url(database_url: str):
+    settings.DATABASE_URL = database_url
+    return init_engine(database_url)
+
+
+def _normalize_sqlite_ddl(ddl: str) -> str:
+    """Convert common non-SQLite DDL syntax into SQLite-compatible SQL."""
+    ddl = re.sub(r'`', '', ddl)
+    ddl = re.sub(r'\bAUTO_INCREMENT\b', 'AUTOINCREMENT', ddl, flags=re.IGNORECASE)
+    ddl = re.sub(r'\bINT\b', 'INTEGER', ddl, flags=re.IGNORECASE)
+    ddl = re.sub(r'\bUNSIGNED\b', '', ddl, flags=re.IGNORECASE)
+    ddl = re.sub(r'\bSIGNED\b', '', ddl, flags=re.IGNORECASE)
+    ddl = re.sub(r'\bDOUBLE\b', 'REAL', ddl, flags=re.IGNORECASE)
+    ddl = re.sub(r'ENGINE\s*=\s*\w+\b', '', ddl, flags=re.IGNORECASE)
+    ddl = re.sub(r'CHARACTER SET\s+\w+\b', '', ddl, flags=re.IGNORECASE)
+    ddl = re.sub(r'COLLATE\s+\w+\b', '', ddl, flags=re.IGNORECASE)
+    ddl = re.sub(r'AUTO_INCREMENT\s*=\s*\d+\b', '', ddl, flags=re.IGNORECASE)
+    return ddl
+
+
+def create_in_memory_db_from_ddl(ddl: str):
+    if not ddl or not ddl.strip():
+        raise ValueError("DDL must be provided when connecting via schema DDL.")
+
+    normalized_ddl = _normalize_sqlite_ddl(ddl)
+    init_engine("sqlite:///:memory:")
+    with get_engine().begin() as conn:
+        for stmt in [stmt.strip() for stmt in normalized_ddl.strip().split(";") if stmt.strip()]:
+            conn.execute(text(stmt))
+    return _engine
+
+
+def get_engine():
+    if _engine is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No database connected. Connect via POST /api/v1/connect first.",
+        )
+    return _engine
 
 
 def get_db() -> Generator[Session, None, None]:
     """FastAPI dependency: yields a DB session and closes it after the request."""
-    db = SessionLocal()
+    if _SessionLocal is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No database connected. Connect via POST /api/v1/connect first.",
+        )
+
+    db = _SessionLocal()
     try:
         yield db
     finally:
@@ -42,7 +101,7 @@ def get_schema_info() -> Dict[str, Any]:
     Return a structured description of every table and column in the database.
     Used to build context-rich prompts for the SLM.
     """
-    inspector = inspect(engine)
+    inspector = inspect(get_engine())
     schema: Dict[str, Any] = {}
 
     for table_name in inspector.get_table_names():
@@ -130,6 +189,12 @@ def seed_sample_data() -> None:
     Create and populate demo tables if they don't exist yet.
     Safe to call multiple times — uses CREATE TABLE IF NOT EXISTS.
     """
+    if _engine is None:
+        if settings.DATABASE_URL:
+            init_engine(settings.DATABASE_URL)
+        else:
+            raise RuntimeError("No database connected to seed sample data.")
+
     ddl_and_inserts = """
     CREATE TABLE IF NOT EXISTS employees (
         id INTEGER PRIMARY KEY,
@@ -197,7 +262,7 @@ def seed_sample_data() -> None:
     INSERT OR IGNORE INTO employee_projects VALUES (8, 3, 'Analyst');
     """
 
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         for stmt in ddl_and_inserts.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
@@ -209,3 +274,11 @@ def seed_sample_data() -> None:
         conn.commit()
 
     logger.info("✅ Sample data seeded successfully.")
+
+
+# Initialize engine if DATABASE_URL is already configured.
+try:
+    if settings.DATABASE_URL:
+        init_engine(settings.DATABASE_URL)
+except Exception as exc:
+    logger.warning(f"Database initialization skipped: {exc}")
