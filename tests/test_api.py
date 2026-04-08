@@ -7,8 +7,7 @@ Run with:
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
 # Use an in-memory SQLite database for tests
 import os
@@ -17,25 +16,7 @@ os.environ["DATABASE_TYPE"] = "sqlite"
 os.environ["SAFE_MODE"] = "true"
 
 from app.main import app
-from app.db.database import get_db, seed_sample_data, engine as real_engine
-
-# ---------------------------------------------------------------------------
-# Test fixtures
-# ---------------------------------------------------------------------------
-
-TEST_ENGINE = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-TestSession = sessionmaker(autocommit=False, autoflush=False, bind=TEST_ENGINE)
-
-
-def override_get_db():
-    db = TestSession()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
+from app.db.database import seed_sample_data
 
 client = TestClient(app)
 
@@ -43,10 +24,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def setup_test_db():
     """Create tables and seed data before each test."""
-    from app.db.database import seed_sample_data
-    # Point seed at test engine
-    from sqlalchemy import event
-    seed_sample_data()   # seeds real engine (sqlite file) — ok for integration
+    seed_sample_data()
     yield
 
 
@@ -91,6 +69,23 @@ class TestSchema:
         assert "ddl" in data
         assert isinstance(data["ddl"], str)
         assert len(data["ddl"]) > 0
+
+    def test_connect_with_ddl(self):
+        ddl = "CREATE TABLE test_items (id INTEGER PRIMARY KEY, name TEXT);"
+        r = client.post("/api/v1/connect", json={"ddl": ddl})
+        assert r.status_code == 200
+        data = r.json()
+        assert "tables" in data
+        assert "test_items" in data["tables"]
+        assert "ddl" in data
+
+    def test_connect_with_mysql_style_autoincrement(self):
+        ddl = "CREATE TABLE categories (category_id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL, description TEXT);"
+        r = client.post("/api/v1/connect", json={"ddl": ddl})
+        assert r.status_code == 200
+        data = r.json()
+        assert "categories" in data["tables"]
+        assert "ddl" in data
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +184,19 @@ class TestSQLGenerator:
         raw = "### SQL: SELECT name FROM employees;"
         sql = _extract_sql(raw)
         assert "SELECT" in sql.upper()
+
+    def test_extract_table_names_from_sql(self):
+        from app.models.sql_generator import _extract_table_names_from_sql
+        sql = "SELECT p.name FROM products p JOIN categories c ON p.category_id = c.category_id;"
+        tables = _extract_table_names_from_sql(sql)
+        assert tables == {"products", "categories"}
+
+    def test_validate_sql_tables_detects_unknown(self):
+        from app.models.sql_generator import _validate_sql_tables
+        sql = "SELECT name FROM product_names;"
+        ddl = "CREATE TABLE products (product_id INTEGER, name TEXT);"
+        invalid = _validate_sql_tables(sql, ddl)
+        assert invalid == ["product_names"]
 
     def test_generate_sql_no_model(self):
         from app.models.sql_generator import generate_sql

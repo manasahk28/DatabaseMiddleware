@@ -8,8 +8,8 @@ class Settings:
     """Store all configuration settings"""
 
     # Database settings
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./company.db")
-    DATABASE_TYPE: str = os.getenv("DATABASE_TYPE", "sqlite")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
+    DATABASE_TYPE: str = os.getenv("DATABASE_TYPE", "").strip() or "sqlite"
 
     # AI Model settings
     SLM_MODEL_NAME: str = os.getenv("SLM_MODEL_NAME", "google/flan-t5-base")

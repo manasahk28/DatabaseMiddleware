@@ -33,6 +33,25 @@ class RawSQLRequest(BaseModel):
     sql: str = Field(..., example="SELECT * FROM employees LIMIT 5;")
 
 
+class ConnectRequest(BaseModel):
+    """Body for POST /connect — connect a database or load schema DDL."""
+    database_url: Optional[str] = Field(
+        None,
+        example="sqlite:///./mydata.db",
+        description="A SQLAlchemy-style database URL to connect to.",
+    )
+    ddl: Optional[str] = Field(
+        None,
+        description="Schema DDL to create an in-memory database for query generation and execution.",
+    )
+
+
+class ConnectResponse(BaseModel):
+    tables: List[str]
+    ddl: str
+    database_url: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------

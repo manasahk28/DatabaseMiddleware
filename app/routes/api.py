@@ -14,11 +14,20 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db.database import get_db, get_schema_info, schema_to_ddl, execute_query
+from app.db.database import (
+    get_db,
+    get_schema_info,
+    schema_to_ddl,
+    execute_query,
+    set_database_url,
+    create_in_memory_db_from_ddl,
+)
 from app.models.sql_generator import generate_sql
 from app.models.schemas import (
     QueryRequest,
     RawSQLRequest,
+    ConnectRequest,
+    ConnectResponse,
     NLPQueryResponse,
     QueryResult,
     SchemaResponse,
@@ -62,7 +71,7 @@ def nlp_to_sql(request: QueryRequest, db: Session = Depends(get_db)):
     result_payload = None
     exec_error = gen.get("error")
 
-    if request.execute:
+    if request.execute and not exec_error:
         try:
             raw_result = execute_query(gen["sql"], db)
             result_payload = QueryResult(**raw_result)
@@ -79,6 +88,38 @@ def nlp_to_sql(request: QueryRequest, db: Session = Depends(get_db)):
         result=result_payload,
         error=exec_error,
     )
+
+
+# ---------------------------------------------------------------------------
+# Database connection
+# ---------------------------------------------------------------------------
+
+@router.post("/connect", response_model=ConnectResponse, tags=["Schema"])
+def connect_database(request: ConnectRequest):
+    """Connect an external database URL or create an in-memory DB from DDL."""
+    if bool(request.database_url) == bool(request.ddl):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide exactly one of database_url or ddl.",
+        )
+
+    try:
+        if request.database_url:
+            set_database_url(request.database_url)
+        else:
+            create_in_memory_db_from_ddl(request.ddl)
+
+        schema = get_schema_info()
+        ddl = schema_to_ddl(schema)
+        return ConnectResponse(
+            tables=list(schema.keys()),
+            ddl=ddl,
+            database_url=request.database_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------

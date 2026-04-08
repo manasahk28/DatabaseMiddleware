@@ -16,7 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routes.api import router
-from app.db.database import seed_sample_data
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -36,13 +35,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"🚀 Server starting → http://{settings.API_HOST}:{settings.API_PORT}")
-    logger.info(f"📊 Database : {settings.DATABASE_TYPE} ({settings.DATABASE_URL})")
+    logger.info(f"📊 Database : {settings.DATABASE_TYPE} ({settings.DATABASE_URL or 'unconfigured'})")
     logger.info(f"🤖 SLM     : {settings.SLM_MODEL_NAME}  device={settings.DEVICE}")
     logger.info(f"🔒 SafeMode: {settings.SAFE_MODE}")
-    try:
-        seed_sample_data()
-    except Exception as exc:
-        logger.warning(f"⚠️  Seeding skipped: {exc}")
     yield
     # Shutdown
     logger.info("👋 Server shutting down…")

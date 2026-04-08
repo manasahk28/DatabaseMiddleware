@@ -111,7 +111,9 @@ def build_prompt(natural_language: str, ddl: str) -> str:
     """Construct the prompt sent to the SLM."""
     return (
         f"You are an expert SQL generator. Given the database schema below, "
-        f"convert the natural language question into a valid SQL query.\n\n"
+        f"convert the natural language question into a valid SQL query. "
+        f"Use only the tables and columns shown in the schema. Do not invent any "
+        f"table names, column names, or joins that are not present in the schema.\n\n"
         f"### Database Schema:\n{ddl}\n\n"
         f"### Examples:\n{FEW_SHOT_EXAMPLES}\n"
         f"### Question: {natural_language}\n"
@@ -187,6 +189,33 @@ def _extract_sql(raw: str) -> str:
     return raw
 
 
+def _extract_table_names_from_sql(sql: str) -> set[str]:
+    """Extract table names from simple FROM/JOIN clauses in SQL."""
+    names = set()
+    for match in re.finditer(r"\b(?:from|join)\s+[`\"']?(\w+)[`\"']?", sql, flags=re.IGNORECASE):
+        names.add(match.group(1).lower())
+    return names
+
+
+def _extract_table_names_from_ddl(ddl: str) -> set[str]:
+    """Extract table names from CREATE TABLE statements in the DDL."""
+    names = set()
+    for match in re.finditer(
+        r"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\"']?(\w+)[`\"']?\s*\(",
+        ddl,
+        flags=re.IGNORECASE,
+    ):
+        names.add(match.group(1).lower())
+    return names
+
+
+def _validate_sql_tables(sql: str, ddl: str) -> list[str]:
+    """Return a list of table names used in SQL that are not present in the DDL."""
+    valid_tables = _extract_table_names_from_ddl(ddl)
+    invalid = [name for name in _extract_table_names_from_sql(sql) if name not in valid_tables]
+    return invalid
+
+
 # ---------------------------------------------------------------------------
 # Rule-based fallback (no model required)
 # ---------------------------------------------------------------------------
@@ -256,6 +285,19 @@ def generate_sql(
         prompt = build_prompt(natural_language, ddl)
         raw_output = _generate_with_model(prompt, model_name)
         sql = _extract_sql(raw_output)
+
+        invalid_tables = _validate_sql_tables(sql, ddl)
+        if invalid_tables:
+            return {
+                "sql": sql,
+                "method": "slm",
+                "model_used": model_name,
+                "confidence": "low",
+                "error": (
+                    f"Generated SQL references unknown tables: {', '.join(sorted(set(invalid_tables)))}. "
+                    "Please verify the database schema and try again."
+                ),
+            }
 
         # Basic sanity check
         if not sql.strip().upper().startswith(("SELECT", "WITH", "INSERT", "UPDATE", "DELETE")):
