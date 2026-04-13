@@ -9,10 +9,11 @@
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
-    --bg: #f0f4ff;
-    --bg-mesh: radial-gradient(ellipse at 20% 0%, #dde8ff 0%, transparent 55%),
-               radial-gradient(ellipse at 80% 10%, #f3dcff 0%, transparent 50%),
-               radial-gradient(ellipse at 50% 100%, #d9f0ff 0%, transparent 60%);
+    --bg: #f5eef8;
+    --bg-mesh: radial-gradient(ellipse at 15% 10%, #f9d6e8 0%, transparent 50%),
+               radial-gradient(ellipse at 85% 5%, #e8d6f5 0%, transparent 50%),
+               radial-gradient(ellipse at 50% 60%, #dce8f8 0%, transparent 55%),
+               radial-gradient(ellipse at 30% 90%, #f0d6f0 0%, transparent 50%);
     --surface: #ffffff;
     --surface2: #f5f7ff;
     --surface3: #eef1fc;
@@ -25,7 +26,7 @@
     --accent2: #8b5cf6;
     --accent-light: #eef0fe;
     --accent-text: #4338ca;
-    --accent-grad: linear-gradient(135deg, #6366f1, #8b5cf6);
+    --accent-grad: linear-gradient(135deg, #7c3aed, #db2777);
     --success: #059669;
     --success-light: #d1fae5;
     --danger: #dc2626;
@@ -171,7 +172,7 @@
     box-shadow: 0 3px 10px rgba(99,102,241,0.3);
   }
   .avatar.user {
-    background: linear-gradient(135deg, #f0abfc, #a78bfa);
+    background: linear-gradient(135deg, #a78bfa, #c084fc);
     color: #fff;
     box-shadow: 0 3px 10px rgba(167,139,250,0.3);
   }
@@ -372,25 +373,30 @@
 
   /* ── INPUT AREA ── */
   .input-area {
-    background: rgba(255,255,255,0.8);
-    backdrop-filter: blur(16px);
-    border-top: 1px solid var(--border);
-    padding: 14px 24px 16px;
+    background: transparent;
+    padding: 10px 20px 18px;
     flex-shrink: 0;
-    box-shadow: 0 -4px 24px rgba(99,102,241,0.05);
+  }
+  .input-card {
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1.5px solid rgba(180,160,220,0.22);
+    border-radius: 24px;
+    padding: 14px 16px 12px;
+    box-shadow: 0 4px 32px rgba(120,80,200,0.10), 0 1.5px 8px rgba(120,80,200,0.06);
   }
   .input-row {
     display: flex; gap: 10px; align-items: flex-end;
-    background: var(--surface);
-    border: 1.5px solid var(--border2);
-    border-radius: var(--radius);
-    padding: 10px 12px;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    box-shadow: var(--shadow-sm);
+    background: transparent;
+    border: none;
+    border-bottom: 1.5px solid rgba(180,160,220,0.18);
+    border-radius: 0;
+    padding: 4px 4px 12px;
+    transition: border-color 0.2s;
   }
   .input-row:focus-within {
-    border-color: var(--accent);
-    box-shadow: var(--shadow-input);
+    border-bottom-color: var(--accent);
   }
   #user-input {
     flex: 1;
@@ -507,7 +513,7 @@
 
 <header>
   <div class="header-left">
-    <div class="logo">📊</div>
+    <div class="logo">✨</div>
     <div>
       <div class="header-title">DB Middleware Chat</div>
       <div class="header-sub">Natural Language → SQL</div>
@@ -527,36 +533,40 @@
 </div>
 
 <div id="messages">
-  <div class="empty-state" id="empty-state">
-    <div class="empty-icon-wrap">📊</div>
-    <div class="empty-title">Ask anything about your data</div>
-    <div class="empty-sub">Type a question in plain English. Connect a database first by entering a DB URL or pasting schema DDL.</div>
-    <div class="empty-chips">
-      <button class="empty-chip" onclick="useHint('Show all employees')">All employees</button>
-      <button class="empty-chip" onclick="useHint('Average salary by department')">Avg salary by dept</button>
-      <button class="empty-chip" onclick="useHint('Top 5 highest paid')">Top 5 paid</button>
+  <div class="msg" id="schema-chooser-init">
+    <div class="avatar bot">DB</div>
+    <div class="bubble">
+      <div class="schema-prompt">
+        <p>How would you like to connect your database?</p>
+        <div class="choice-row">
+          <button class="choice-btn" onclick="showDBUrlInput(this)">🔗 Connect DB URL<br><small style="color:var(--text3);font-weight:400">sqlite:///./mydata.db or<br>SQLAlchemy URL</small></button>
+          <button class="choice-btn" onclick="showDDLInput(this)">📄 Paste schema DDL<br><small style="color:var(--text3);font-weight:400">create an in-memory database</small></button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
 <div class="input-area">
-  <div class="input-row">
-    <textarea id="user-input" rows="1" placeholder="Ask a question about your data…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-    <button class="send-btn" id="send-btn" onclick="sendMessage()">
-      <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
-    </button>
-  </div>
-  <div class="input-hints">
-    <button class="hint-btn" onclick="useHint('Show all employees')">All employees</button>
-    <button class="hint-btn" onclick="useHint('Average salary by department')">Avg salary by dept</button>
-    <button class="hint-btn" onclick="useHint('List all active projects')">Active projects</button>
-    <button class="hint-btn" onclick="useHint('Top 5 highest paid employees')">Top 5 paid</button>
-    <button class="hint-btn" onclick="useHint('Count employees per department')">Count by dept</button>
-  </div>
-  <div class="settings-row">
-    <label class="toggle-label"><input type="checkbox" id="use-model"> Use AI model (SLM)</label>
-    <label class="toggle-label"><input type="checkbox" id="execute-query" checked> Execute query</label>
-    <span class="db-badge" id="db-label">DB: not connected</span>
+  <div class="input-card">
+    <div class="input-row">
+      <textarea id="user-input" rows="1" placeholder="Ask a question about your data…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button class="send-btn" id="send-btn" onclick="sendMessage()">
+        <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+      </button>
+    </div>
+    <div class="input-hints">
+      <button class="hint-btn" onclick="useHint('Show all employees')">All employees</button>
+      <button class="hint-btn" onclick="useHint('Average salary by department')">Avg salary by dept</button>
+      <button class="hint-btn" onclick="useHint('List all active projects')">Active projects</button>
+      <button class="hint-btn" onclick="useHint('Top 5 highest paid employees')">Top 5 paid</button>
+      <button class="hint-btn" onclick="useHint('Count employees per department')">Count by dept</button>
+    </div>
+    <div class="settings-row">
+      <label class="toggle-label"><input type="checkbox" id="use-model"> Use AI model (SLM)</label>
+      <label class="toggle-label"><input type="checkbox" id="execute-query" checked> Execute query</label>
+      <span class="db-badge" id="db-label">DB: not connected</span>
+    </div>
   </div>
 </div>
 
@@ -596,6 +606,7 @@ function updateSchemaBar(tables, connected) {
 
 function addMsg(html, isUser) {
   document.getElementById('empty-state')?.remove();
+  document.getElementById('schema-chooser-init')?.remove();
   const msgs = document.getElementById('messages');
   const d = document.createElement('div');
   d.className = 'msg' + (isUser ? ' user' : '');
@@ -618,6 +629,7 @@ function removeTyping() { document.getElementById('typing')?.remove(); }
 
 function showSchemaChooser() {
   document.getElementById('empty-state')?.remove();
+  document.getElementById('schema-chooser-init')?.remove();
   const d = addMsg(`
     <div class="schema-prompt">
       <p>How would you like to connect your database?</p>
@@ -631,6 +643,7 @@ function showSchemaChooser() {
 
 function showDBUrlInput(btn) {
   document.getElementById('schema-chooser')?.remove();
+  document.getElementById('schema-chooser-init')?.remove();
   const d = addMsg(`
     <div class="schema-prompt">
       <p>Enter your database connection URL.</p>
@@ -645,6 +658,7 @@ function showDBUrlInput(btn) {
 
 function showDDLInput(btn) {
   document.getElementById('schema-chooser')?.remove();
+  document.getElementById('schema-chooser-init')?.remove();
   const d = addMsg(`
     <div class="schema-prompt">
       <p>Paste your CREATE TABLE statements below. This will create an in-memory database for query execution.</p>
